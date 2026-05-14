@@ -3233,6 +3233,32 @@ static int adev_init_check(const struct audio_hw_device *dev)
     return ret;
 }
 
+#ifdef EXYNOS9810_CALLVOL_FIX
+static int voice_idx_to_rcv_digital_gain(int idx)
+{
+    /* idx: 0  1  2  3  4  5 */
+    static const int kGain[] = { 0, 6, 12, 18, 24, 32 };
+    if (idx < 0) idx = 0;
+    if (idx > 5) idx = 5;
+    return kGain[idx];
+}
+
+static void apply_incall_rcv_gain(struct audio_device *adev, float volume)
+{
+    int idx, gain;
+
+    if (!adev || !adev->proxy || !adev->voice)
+        return;
+
+    idx  = voice_get_volume_index(adev->voice, volume); /* usually 0..5 */
+    gain = voice_idx_to_rcv_digital_gain(idx);
+
+    proxy_set_mixer_value_int(adev->proxy, "Rcv Digital Gain", gain);
+    ALOGI("device-%s: VOICE_CALL vol=%0.6f idx=%d -> Rcv Digital Gain=%d (dev=0x%x)",
+          __func__, volume, idx, gain, adev->actual_playback_device);
+}
+#endif
+
 static int adev_set_voice_volume(struct audio_hw_device *dev, float volume)
 {
     struct audio_device *adev = (struct audio_device *)dev;
@@ -3244,8 +3270,12 @@ static int adev_set_voice_volume(struct audio_hw_device *dev, float volume)
     }
 
     pthread_mutex_lock(&adev->lock);
-    if (adev->voice && voice_is_call_mode(adev->voice))
-        voice_set_volume(adev->voice, volume);
+    if (adev->voice && voice_is_call_mode(adev->voice)) {
+         voice_set_volume(adev->voice, volume);
+#ifdef EXYNOS9810_CALLVOL_FIX
+        apply_incall_rcv_gain(adev, volume);
+#endif
+    }
     else if (adev->voice_volume == 0.0 &&
             (get_active_playback_count(adev, primary_output) > 0) &&
             (primary_output->force == FORCE_ROUTE && primary_output->rollback_devices != AUDIO_DEVICE_NONE)) {
